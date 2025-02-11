@@ -2,6 +2,9 @@ from transformers import Wav2Vec2Processor, HubertModel
 import soundfile as sf
 import numpy as np
 import torch
+import torchaudio
+from torchaudio.transforms import Resample
+from argparse import ArgumentParser
 
 print("Loading the Wav2Vec2 Processor...")
 wav2vec2_processor = Wav2Vec2Processor.from_pretrained("facebook/hubert-large-ls960-ft")
@@ -68,22 +71,28 @@ def make_even_first_dim(tensor):
         return tensor[:size[0]]
     return tensor
 
-import soundfile as sf
-import numpy as np
-import torch
-from argparse import ArgumentParser
-import librosa
-
 parser = ArgumentParser()
 parser.add_argument('--wav', type=str, help='')
 args = parser.parse_args()
 
 wav_name = args.wav
 
-speech, sr = sf.read(wav_name)
-speech_16k = librosa.resample(speech, orig_sr=sr, target_sr=16000)
-print("SR: {} to {}".format(sr, 16000))
-# print(speech.shape, speech_16k.shape)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+speech, sr = torchaudio.load(wav_name)
+target_sample = 16000
+speech_16k = None
+
+if sr!=target_sample:
+    resampler = Resample(orig_freq=sr, new_freq=target_sample).to(device)
+    speech = speech.to(device)
+    speech_16k = resampler(speech)
+    print("SR: {} to {}".format(sr, 16000))
+    # 保存为文件
+    save_name = wav_name.replace('.wav', '_16k.wav')
+    torchaudio.save(save_name, speech_16k.to('cpu'), target_sample)
+    speech_16k, sr = sf.read(save_name)
+else:
+    speech_16k = speech
 
 hubert_hidden = get_hubert_from_16k_speech(speech_16k)
 hubert_hidden = make_even_first_dim(hubert_hidden).reshape(-1, 2, 1024)
